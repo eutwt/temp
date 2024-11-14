@@ -88,3 +88,23 @@ if __name__ == "__main__":
 
     # Display the DataFrame
     print(df.head())
+
+
+##########
+
+import requests
+import base64
+
+username = 'your_username'
+password = 'your_password'
+url = 'https://now.wf.com/api/now/table/demand'
+
+# Create Basic Auth header
+credentials = f"{username}:{password}"
+encoded_credentials = base64.b64encode(credentials.encode('utf-8')).decode('utf-8')
+headers = {
+    'Authorization': f'Basic {encoded_credentials}',
+    'Content-Type': 'application/json'
+}
+
+response = requests.get(url, headers=headers)
