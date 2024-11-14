@@ -1,37 +1,50 @@
 import requests
 import pandas as pd
 
-# Replace these with your ServiceNow instance details
-INSTANCE = 'your_instance'  # e.g., 'dev12345'
-USERNAME = 'your_username'
-PASSWORD = 'your_password'
+def fetch_demands(instance, username, password, sysparm_fields=None, sysparm_query='', sysparm_limit=1000):
+    """
+    Fetches demand records from a ServiceNow instance and returns them as a list of dictionaries.
 
-# Base URL for the ServiceNow Table API
-BASE_URL = f'https://{INSTANCE}.service-now.com/api/now/table/demand'
+    Parameters:
+    - instance (str): The ServiceNow instance name (e.g., 'dev12345').
+    - username (str): The username for authentication.
+    - password (str): The password for authentication.
+    - sysparm_fields (str): Comma-separated list of fields to retrieve. If None, all fields are retrieved.
+    - sysparm_query (str): The query string to filter records.
+    - sysparm_limit (int): The maximum number of records per request.
 
-# Headers for the HTTP request
-HEADERS = {
-    "Accept": "application/json",
-    "Content-Type": "application/json"
-}
+    Returns:
+    - records (list): A list of dictionaries containing the demand records.
+    """
 
-# Parameters to filter and limit the data
-PARAMS = {
-    'sysparm_fields': 'number,short_description,requested_by,due_date',  # Specify the fields you need
-    'sysparm_limit': '1000',  # Adjust the limit as needed
-    'sysparm_query': '',  # Add any query parameters if required
-}
+    # Base URL for the ServiceNow Table API
+    BASE_URL = f'https://{instance}.service-now.com/api/now/table/demand'
 
-# Function to fetch data with pagination support
-def fetch_demands():
+    # Headers for the HTTP request
+    HEADERS = {
+        "Accept": "application/json",
+        "Content-Type": "application/json"
+    }
+
+    # Parameters to filter and limit the data
+    PARAMS = {
+        'sysparm_limit': sysparm_limit,  # Adjust the limit as needed
+    }
+
+    if sysparm_fields:
+        PARAMS['sysparm_fields'] = sysparm_fields
+
+    if sysparm_query:
+        PARAMS['sysparm_query'] = sysparm_query
+
+    # Pagination variables
     records = []
     offset = 0
-    limit = 1000  # Maximum number of records per request
     while True:
         PARAMS['sysparm_offset'] = offset
         response = requests.get(
             BASE_URL,
-            auth=(USERNAME, PASSWORD),
+            auth=(username, password),
             headers=HEADERS,
             params=PARAMS
         )
@@ -44,14 +57,34 @@ def fetch_demands():
         if not result:
             break  # No more records
         records.extend(result)
-        offset += limit
+        offset += sysparm_limit
     return records
 
-# Fetch the demands data
-demands_data = fetch_demands()
+# Example usage
+if __name__ == "__main__":
+    # Replace these with your ServiceNow instance details
+    INSTANCE = 'your_instance'  # e.g., 'dev12345'
+    USERNAME = 'your_username'
+    PASSWORD = 'your_password'
 
-# Load data into a pandas DataFrame
-df = pd.DataFrame(demands_data)
+    # Define the fields you want to retrieve
+    FIELDS = 'number,short_description,requested_by,due_date'
 
-# Display the DataFrame
-print(df.head())
+    # Define any query parameters
+    QUERY = ''  # e.g., 'state=active^priority=1'
+
+    # Fetch the demands data
+    demands_data = fetch_demands(
+        instance=INSTANCE,
+        username=USERNAME,
+        password=PASSWORD,
+        sysparm_fields=FIELDS,
+        sysparm_query=QUERY,
+        sysparm_limit=1000
+    )
+
+    # Load data into a pandas DataFrame
+    df = pd.DataFrame(demands_data)
+
+    # Display the DataFrame
+    print(df.head())
