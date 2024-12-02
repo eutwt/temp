@@ -17,11 +17,16 @@ def get_directory_size(directory: Path) -> int:
     """Calculate total size of a directory and its subdirectories."""
     total_size = 0
     try:
-        for path in directory.rglob('*'):
-            if path.is_file() and not path.is_symlink():
-                total_size += path.stat().st_size
+        for root, dirs, files in os.walk(directory, followlinks=False):
+            for name in files:
+                try:
+                    file_path = Path(root) / name
+                    if not file_path.is_symlink():
+                        total_size += file_path.stat().st_size
+                except (PermissionError, OSError):
+                    continue
     except (PermissionError, OSError):
-        pass  # Skip directories we can't access
+        pass
     return total_size
 
 def analyze_directories(start_path: str = '.') -> List[Tuple[str, int]]:
@@ -31,20 +36,22 @@ def analyze_directories(start_path: str = '.') -> List[Tuple[str, int]]:
     directory_sizes = []
     start_path = Path(start_path).resolve()
     
-    # Get all directories recursively
-    for directory in [x for x in start_path.rglob('*') if x.is_dir()]:
-        try:
-            # Skip hidden directories
-            if any(part.startswith('.') for part in directory.parts):
+    # Walk through directories using os.walk
+    for root, dirs, _ in os.walk(start_path, followlinks=False):
+        # Remove hidden directories from dirs list in-place
+        dirs[:] = [d for d in dirs if not d.startswith('.')]
+        
+        for dir_name in dirs:
+            try:
+                dir_path = Path(root) / dir_name
+                if not dir_path.is_symlink():
+                    size = get_directory_size(dir_path)
+                    directory_sizes.append((str(dir_path), size))
+            except (PermissionError, OSError):
                 continue
-                
-            size = get_directory_size(directory)
-            directory_sizes.append((str(directory), size))
-        except (PermissionError, OSError):
-            continue
-            
+    
     # Add the start directory itself
-    if not start_path.parts[-1].startswith('.'):
+    if not start_path.parts[-1].startswith('.') and not start_path.is_symlink():
         size = get_directory_size(start_path)
         directory_sizes.append((str(start_path), size))
     
@@ -65,21 +72,30 @@ def main():
     # Convert minimum size to bytes
     min_bytes = int(args.min_size * 1024 * 1024)
     
-    # Get and display directory sizes
-    directory_sizes = analyze_directories(args.path)
-    base_path = Path(args.path).resolve()
-    
-    for path, size in directory_sizes:
-        if size < min_bytes:
-            continue
-            
-        # Calculate directory depth relative to start path
-        rel_path = Path(path).relative_to(base_path.parent)
-        depth = len(rel_path.parts) - 1
-        indent = "  " * depth
+    try:
+        # Get and display directory sizes
+        directory_sizes = analyze_directories(args.path)
+        base_path = Path(args.path).resolve()
         
-        # Display size and path
-        print(f"{indent}{get_human_readable_size(size):<10} {path}")
+        for path, size in directory_sizes:
+            if size < min_bytes:
+                continue
+                
+            # Calculate directory depth relative to start path
+            try:
+                rel_path = Path(path).relative_to(base_path.parent)
+                depth = len(rel_path.parts) - 1
+            except ValueError:
+                # Handle case where path is not relative to base_path
+                depth = 0
+            
+            indent = "  " * depth
+            print(f"{indent}{get_human_readable_size(size):<10} {path}")
+            
+    except KeyboardInterrupt:
+        print("\nOperation cancelled by user")
+    except Exception as e:
+        print(f"\nError: {e}")
 
 if __name__ == "__main__":
     main()
