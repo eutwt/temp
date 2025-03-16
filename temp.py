@@ -1,110 +1,47 @@
-import requests
+import duckdb
 import pandas as pd
+from datetime import date, timedelta
+import random
+import string
 
-def fetch_demands(instance, username, password, sysparm_fields=None, sysparm_query='', sysparm_limit=1000):
-    """
-    Fetches demand records from a ServiceNow instance and returns them as a list of dictionaries.
+# Connect to an in-memory DuckDB database
+con = duckdb.connect(database=':memory:')
 
-    Parameters:
-    - instance (str): The ServiceNow instance name (e.g., 'dev12345').
-    - username (str): The username for authentication.
-    - password (str): The password for authentication.
-    - sysparm_fields (str): Comma-separated list of fields to retrieve. If None, all fields are retrieved.
-    - sysparm_query (str): The query string to filter records.
-    - sysparm_limit (int): The maximum number of records per request.
+# Generate the data directly in DuckDB using SQL
+# This is more efficient than generating in Python first
 
-    Returns:
-    - records (list): A list of dictionaries containing the demand records.
-    """
+# Set the number of rows
+num_rows = 3000000
 
-    # Base URL for the ServiceNow Table API
-    BASE_URL = f'https://{instance}.service-now.com/api/now/table/demand'
+# Create a query that generates random data
+query = f"""
+CREATE TABLE random_data AS
+SELECT 
+    (DATE '2020-01-01' + INTERVAL (RANDOM() * 1095) DAY)::DATE AS date_col,
+    chr(65 + RANDOM() * 26)::VARCHAR || 
+    chr(65 + RANDOM() * 26)::VARCHAR || 
+    chr(65 + RANDOM() * 26)::VARCHAR || 
+    chr(65 + RANDOM() * 26)::VARCHAR || 
+    chr(65 + RANDOM() * 26)::VARCHAR AS char_col,
+    (RANDOM() * 1000)::DECIMAL(10,2) AS numeric_col
+FROM range(1, {num_rows + 1});
+"""
 
-    # Headers for the HTTP request
-    HEADERS = {
-        "Accept": "application/json",
-        "Content-Type": "application/json"
-    }
+# Execute the query to create the table
+con.execute(query)
 
-    # Parameters to filter and limit the data
-    PARAMS = {
-        'sysparm_limit': sysparm_limit,  # Adjust the limit as needed
-    }
+# Verify the table was created with the correct number of rows
+row_count = con.execute("SELECT COUNT(*) FROM random_data").fetchone()[0]
+print(f"Generated {row_count} rows")
 
-    if sysparm_fields:
-        PARAMS['sysparm_fields'] = sysparm_fields
+# Save the table as a parquet file
+con.execute("COPY random_data TO 'random_data.parquet' (FORMAT PARQUET)")
 
-    if sysparm_query:
-        PARAMS['sysparm_query'] = sysparm_query
+print("Data saved to random_data.parquet")
 
-    # Pagination variables
-    records = []
-    offset = 0
-    while True:
-        PARAMS['sysparm_offset'] = offset
-        response = requests.get(
-            BASE_URL,
-            auth=(username, password),
-            headers=HEADERS,
-            params=PARAMS
-        )
-        if response.status_code != 200:
-            print('Error:', response.status_code, response.reason)
-            break
+# Optional: Show a sample of the data
+print("\nSample data:")
+print(con.execute("SELECT * FROM random_data LIMIT 5").fetchdf())
 
-        data = response.json()
-        result = data.get('result', [])
-        if not result:
-            break  # No more records
-        records.extend(result)
-        offset += sysparm_limit
-    return records
-
-# Example usage
-if __name__ == "__main__":
-    # Replace these with your ServiceNow instance details
-    INSTANCE = 'your_instance'  # e.g., 'dev12345'
-    USERNAME = 'your_username'
-    PASSWORD = 'your_password'
-
-    # Define the fields you want to retrieve
-    FIELDS = 'number,short_description,requested_by,due_date'
-
-    # Define any query parameters
-    QUERY = ''  # e.g., 'state=active^priority=1'
-
-    # Fetch the demands data
-    demands_data = fetch_demands(
-        instance=INSTANCE,
-        username=USERNAME,
-        password=PASSWORD,
-        sysparm_fields=FIELDS,
-        sysparm_query=QUERY,
-        sysparm_limit=1000
-    )
-
-    # Load data into a pandas DataFrame
-    df = pd.DataFrame(demands_data)
-
-    # Display the DataFrame
-    print(df.head())
-
-
-##########
-
-import requests
-import base64
-
-username = 'your_username'
-password = 'your_password'
-url = 'https://now.wf.com/api/now/table/demand'
-
-# Create Basic Auth header
-credentials = f"{username}:{password}"
-encoded_credentials = base64.b64encode(credentials.encode('utf-8')).decode('utf-8')
-headers = {
-    'Authorization': f'Basic {encoded_credentials}',
-    'Content-Type': 'application/json'
-}
-
-response = requests.get(url, headers=headers)
+# Close the connection
+con.close()
