@@ -1,189 +1,86 @@
-import zipfile
-import xml.etree.ElementTree as ET
-import random
-import shutil
-import os
-from pathlib import Path
-import pandas as pd
-import tempfile
+import openpyxl
+import openpyxl.utils
 
-def sample_excel_rows(input_file, output_file, sample_size, sheet_index=0):
+def assert_ssn_column_is_character(excel_file, sheet_name='Sheet1', header_row=1):
     """
-    Sample rows from an Excel file by directly manipulating the XML for XLSX files
-    or using pandas for XLS files.
-    
+    Asserts that an Excel file contains a column named 'SSN' and all cells
+    in that column (below the header) are formatted as character/text in Excel.
+
     Args:
-        input_file: Path to the input Excel file
-        output_file: Path to save the sampled Excel file
-        sample_size: Number of rows to sample (excluding header)
-        sheet_index: Index of the sheet to sample from (0-based)
-    """
-    # Check file extension
-    file_ext = Path(input_file).suffix.lower()
-    
-    if file_ext == '.xlsx':
-        # For XLSX files, use the XML approach
-        return sample_xlsx_rows(input_file, output_file, sample_size, sheet_index)
-    elif file_ext == '.xls':
-        # For XLS files, use a different approach since they're not ZIP archives
-        return sample_xls_rows(input_file, output_file, sample_size, sheet_index)
-    else:
-        raise ValueError(f"Unsupported file extension: {file_ext}. Only .xlsx and .xls are supported.")
+        excel_file (str): The path to the Excel file.
+        sheet_name (str): The name of the sheet to check. Defaults to 'Sheet1'.
+        header_row (int): The row number where the column headers are located.
+                          Defaults to 1 (the first row).
 
-def sample_xlsx_rows(input_file, output_file, sample_size, sheet_index=0):
+    Raises:
+        FileNotFoundError: If the specified Excel file does not exist.
+        KeyError: If the specified sheet name is not found in the workbook.
+        ValueError: If the 'SSN' column is not found in the header row.
+        AssertionError: If any cell in the 'SSN' column is not formatted as text
+                        in Excel.
     """
-    Sample rows from an XLSX file by directly manipulating the XML.
-    """
-    # Create a temporary directory
-    with tempfile.TemporaryDirectory() as temp_dir:
-        temp_dir_path = Path(temp_dir)
-        
-        # Copy the original file to avoid modifying it
-        shutil.copy(input_file, output_file)
-        
-        # Extract the sheet XML
-        with zipfile.ZipFile(output_file, 'r') as zip_ref:
-            # Find the sheet XML file
-            sheet_files = [f for f in zip_ref.namelist() if f.startswith('xl/worksheets/sheet')]
-            if not sheet_files or sheet_index >= len(sheet_files):
-                raise ValueError(f"Sheet index {sheet_index} not found")
-            
-            sheet_path = sheet_files[sheet_index]
-            
-            # Extract the sheet XML
-            zip_ref.extract(sheet_path, temp_dir_path)
-        
-        # Parse the sheet XML
-        sheet_xml_path = temp_dir_path / sheet_path
-        tree = ET.parse(sheet_xml_path)
-        root = tree.getroot()
-        
-        # Find all rows
-        ns = {'s': 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'}
-        rows = root.findall('.//s:row', ns)
-        
-        if len(rows) <= 1:
-            raise ValueError("Not enough rows to sample")
-        
-        # Keep the header row (first row)
-        header_row = rows[0]
-        
-        # Sample from the remaining rows
-        data_rows = rows[1:]
-        if sample_size >= len(data_rows):
-            print(f"Warning: Requested sample size {sample_size} is >= available rows {len(data_rows)}")
-            sampled_rows = data_rows
-        else:
-            sampled_rows = random.sample(data_rows, sample_size)
-        
-        # Sort the sampled rows by row index to maintain order
-        sampled_rows.sort(key=lambda r: int(r.get('r')))
-        
-        # Remove all rows from the XML
-        for row in rows:
-            parent = root.find('./s:sheetData', ns)
-            if parent is not None:
-                parent.remove(row)
-        
-        # Add back the header and sampled rows
-        sheet_data = root.find('./s:sheetData', ns)
-        sheet_data.append(header_row)
-        
-        # Update row indices to be sequential
-        for i, row in enumerate(sampled_rows):
-            row.set('r', str(i + 2))  # +2 because header is row 1
-            # Update cell references
-            for cell in row.findall('.//s:c', ns):
-                old_ref = cell.get('r')
-                if old_ref:
-                    # Extract column letter part
-                    col = ''.join(c for c in old_ref if c.isalpha())
-                    cell.set('r', f"{col}{i + 2}")
-            
-            sheet_data.append(row)
-        
-        # Save the modified XML
-        tree.write(sheet_xml_path)
-        
-        # Update the zip file with the modified sheet
-        with zipfile.ZipFile(output_file, 'a') as zip_ref:
-            zip_ref.write(sheet_xml_path, sheet_path)
-    
-    return output_file
+    ssn_column_index = -1
+    ssn_column_letter = None
 
-def sample_xls_rows(input_file, output_file, sample_size, sheet_index=0):
-    """
-    Sample rows from an XLS file using pandas and xlwt.
-    
-    Note: This approach doesn't preserve all formatting but maintains data types.
-    For XLS files, we need to use a different library since they're not ZIP archives.
-    """
     try:
-        import xlrd
-        import xlwt
-        from xlutils.copy import copy as xl_copy
-    except ImportError:
-        raise ImportError("Please install xlrd, xlwt, and xlutils: pip install xlrd xlwt xlutils")
-    
-    # Open the workbook
-    rb = xlrd.open_workbook(input_file, formatting_info=True)
-    
-    # Check if sheet index is valid
-    if sheet_index >= rb.nsheets:
-        raise ValueError(f"Sheet index {sheet_index} not found")
-    
-    # Get the sheet
-    sheet = rb.sheet_by_index(sheet_index)
-    
-    # Check if there are enough rows
-    if sheet.nrows <= 1:
-        raise ValueError("Not enough rows to sample")
-    
-    # Create a copy of the workbook
-    wb = xl_copy(rb)
-    
-    # Get the sheet to modify
-    out_sheet = wb.get_sheet(sheet_index)
-    
-    # Sample row indices (excluding header)
-    if sample_size >= sheet.nrows - 1:
-        print(f"Warning: Requested sample size {sample_size} is >= available rows {sheet.nrows - 1}")
-        sampled_indices = list(range(1, sheet.nrows))
-    else:
-        sampled_indices = sorted(random.sample(range(1, sheet.nrows), sample_size))
-    
-    # Create a new workbook
-    new_wb = xlwt.Workbook()
-    
-    # Copy all sheets from the original workbook
-    for sheet_idx in range(rb.nsheets):
-        sheet = rb.sheet_by_index(sheet_idx)
-        new_sheet = new_wb.add_sheet(sheet.name)
-        
-        # If this is the sheet we're sampling
-        if sheet_idx == sheet_index:
-            # Copy header row
-            for col in range(sheet.ncols):
-                new_sheet.write(0, col, sheet.cell_value(0, col))
-            
-            # Copy sampled rows
-            for i, row_idx in enumerate(sampled_indices):
-                for col in range(sheet.ncols):
-                    new_sheet.write(i + 1, col, sheet.cell_value(row_idx, col))
-        else:
-            # Copy entire sheet
-            for row in range(sheet.nrows):
-                for col in range(sheet.ncols):
-                    new_sheet.write(row, col, sheet.cell_value(row, col))
-    
-    # Save the new workbook
-    new_wb.save(output_file)
-    
-    return output_file
+        workbook = openpyxl.load_workbook(excel_file)
+        sheet = workbook[sheet_name]
 
-# Example usage
-if __name__ == "__main__":
-    input_file = "data.xlsx"  # or "data.xls"
-    output_file = "sampled_data" + Path(input_file).suffix
-    sample_excel_rows(input_file, output_file, sample_size=100)
-    print(f"Sampled Excel file saved to {output_file}")
+        # 1. Find the column index and letter of the 'SSN' column in the header row
+        header_row_cells = sheet[header_row]
+        for cell in header_row_cells:
+            if isinstance(cell.value, str) and cell.value.strip().upper() == 'SSN':
+                ssn_column_index = cell.column
+                ssn_column_letter = cell.column_letter
+                break
+
+        if ssn_column_index == -1:
+            raise ValueError(f"Column named 'SSN' not found in row {header_row} of sheet '{sheet_name}'.")
+
+        print(f"Found 'SSN' column at column {ssn_column_letter} (index {ssn_column_index})")
+
+        # 2. Iterate through cells in the SSN column (starting from the row after the header)
+        for row_index in range(header_row + 1, sheet.max_row + 1):
+            cell = sheet.cell(row=row_index, column=ssn_column_index)
+
+            # Check if the number format is '@' (text) and the cell is not empty
+            # We check against both '@' and None for empty cells which are valid
+            if cell.number_format != '@' and cell.value is not None:
+                 raise AssertionError(
+                    f"Cell {cell.coordinate} in the 'SSN' column is not formatted as text in Excel. "
+                    f"Number Format: {cell.number_format}, Value: {cell.value}"
+                )
+            # Optional: You might add a check here to ensure non-empty cells actually
+            # contain string-like data if you have strict requirements beyond Excel's formatting.
+            # For example:
+            # if cell.value is not None and not isinstance(cell.value, str):
+            #      raise AssertionError(f"Cell {cell.coordinate} in the 'SSN' column contains a non-string value: {cell.value}")
+
+
+        print(f"Assertion successful: All cells in the 'SSN' column on sheet '{sheet_name}' are formatted as character/text in Excel.")
+
+    except FileNotFoundError:
+        print(f"Error: File not found at {excel_file}")
+        raise # Re-raise the exception after printing
+    except KeyError:
+        print(f"Error: Sheet '{sheet_name}' not found in the workbook.")
+        raise # Re-raise the exception after printing
+    except ValueError as ve:
+        print(f"Error: {ve}")
+        raise # Re-raise the exception after printing
+    except AssertionError as ae:
+        print(f"Assertion Failed: {ae}")
+        raise # Re-raise the exception after printing
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")
+        raise # Re-raise any other unexpected exceptions
+
+# Example Usage:
+excel_file_path = 'your_excel_file.xlsx' # Replace with the path to your file
+
+try:
+    assert_ssn_column_is_character(excel_file_path)
+    print("Validation passed.")
+except (FileNotFoundError, KeyError, ValueError, AssertionError) as e:
+    print("Validation failed.")
+    # The specific error message is printed within the function
