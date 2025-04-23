@@ -1,30 +1,38 @@
 import openpyxl
 import openpyxl.utils
 
-def assert_ssn_column_is_character(excel_file, sheet_name='Sheet1', header_row=1):
+def assert_ssn_column_is_character_first_sheet(excel_file, header_row=1):
     """
     Asserts that an Excel file contains a column named 'SSN' and all cells
-    in that column (below the header) are formatted as character/text in Excel.
+    in that column (below the header) on the first sheet are formatted
+    as character/text in Excel.
 
     Args:
         excel_file (str): The path to the Excel file.
-        sheet_name (str): The name of the sheet to check. Defaults to 'Sheet1'.
         header_row (int): The row number where the column headers are located.
                           Defaults to 1 (the first row).
 
     Raises:
         FileNotFoundError: If the specified Excel file does not exist.
-        KeyError: If the specified sheet name is not found in the workbook.
-        ValueError: If the 'SSN' column is not found in the header row.
-        AssertionError: If any cell in the 'SSN' column is not formatted as text
-                        in Excel.
+        IndexError: If the workbook is empty (no sheets).
+        ValueError: If the 'SSN' column is not found in the header row on the first sheet.
+        AssertionError: If any cell in the 'SSN' column on the first sheet
+                        is not formatted as text in Excel.
     """
     ssn_column_index = -1
     ssn_column_letter = None
+    sheet = None # Initialize sheet variable
 
     try:
         workbook = openpyxl.load_workbook(excel_file)
+
+        # Get the first sheet
+        if not workbook.sheetnames:
+             raise IndexError(f"The workbook '{excel_file}' contains no sheets.")
+        sheet_name = workbook.sheetnames[0]
         sheet = workbook[sheet_name]
+
+        print(f"Using the first sheet: '{sheet_name}'")
 
         # 1. Find the column index and letter of the 'SSN' column in the header row
         header_row_cells = sheet[header_row]
@@ -35,7 +43,7 @@ def assert_ssn_column_is_character(excel_file, sheet_name='Sheet1', header_row=1
                 break
 
         if ssn_column_index == -1:
-            raise ValueError(f"Column named 'SSN' not found in row {header_row} of sheet '{sheet_name}'.")
+            raise ValueError(f"Column named 'SSN' not found in row {header_row} of the first sheet '{sheet_name}'.")
 
         print(f"Found 'SSN' column at column {ssn_column_letter} (index {ssn_column_index})")
 
@@ -44,11 +52,11 @@ def assert_ssn_column_is_character(excel_file, sheet_name='Sheet1', header_row=1
             cell = sheet.cell(row=row_index, column=ssn_column_index)
 
             # Check if the number format is '@' (text) and the cell is not empty
-            # We check against both '@' and None for empty cells which are valid
             if cell.number_format != '@' and cell.value is not None:
                  raise AssertionError(
-                    f"Cell {cell.coordinate} in the 'SSN' column is not formatted as text in Excel. "
-                    f"Number Format: {cell.number_format}, Value: {cell.value}"
+                    f"Cell {cell.coordinate} in the 'SSN' column on sheet '{sheet_name}' "
+                    f"is not formatted as text in Excel. Number Format: {cell.number_format}, "
+                    f"Value: {cell.value}"
                 )
             # Optional: You might add a check here to ensure non-empty cells actually
             # contain string-like data if you have strict requirements beyond Excel's formatting.
@@ -57,13 +65,14 @@ def assert_ssn_column_is_character(excel_file, sheet_name='Sheet1', header_row=1
             #      raise AssertionError(f"Cell {cell.coordinate} in the 'SSN' column contains a non-string value: {cell.value}")
 
 
-        print(f"Assertion successful: All cells in the 'SSN' column on sheet '{sheet_name}' are formatted as character/text in Excel.")
+        print(f"Assertion successful: All cells in the 'SSN' column on the first sheet "
+              f"'{sheet_name}' are formatted as character/text in Excel.")
 
     except FileNotFoundError:
         print(f"Error: File not found at {excel_file}")
         raise # Re-raise the exception after printing
-    except KeyError:
-        print(f"Error: Sheet '{sheet_name}' not found in the workbook.")
+    except IndexError:
+        print(f"Error: The workbook '{excel_file}' is empty and contains no sheets.")
         raise # Re-raise the exception after printing
     except ValueError as ve:
         print(f"Error: {ve}")
@@ -79,8 +88,8 @@ def assert_ssn_column_is_character(excel_file, sheet_name='Sheet1', header_row=1
 excel_file_path = 'your_excel_file.xlsx' # Replace with the path to your file
 
 try:
-    assert_ssn_column_is_character(excel_file_path)
+    assert_ssn_column_is_character_first_sheet(excel_file_path)
     print("Validation passed.")
-except (FileNotFoundError, KeyError, ValueError, AssertionError) as e:
+except (FileNotFoundError, IndexError, ValueError, AssertionError) as e:
     print("Validation failed.")
     # The specific error message is printed within the function
