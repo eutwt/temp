@@ -1,95 +1,54 @@
-import openpyxl
-import openpyxl.utils
+#!/usr/bin/env python3
+"""
+encode_for_print.py  <input-file>  [group-size]
 
-def assert_ssn_column_is_character_first_sheet(excel_file, header_row=1):
-    """
-    Asserts that an Excel file contains a column named 'SSN' and all cells
-    in that column (below the header) on the first sheet are formatted
-    as character/text in Excel.
+• Reads any binary file.
+• Base‑32–encodes it (A–Z, 2–7 only).
+• Breaks it into fixed‑width lines (60 chars by default).
+• Adds:
+     1. 6‑digit line number
+     2. The block itself
+     3. 8‑hex‑digit CRC‑32 of the block
+• After every <group-size> data lines it emits one XOR‑parity line
+  that lets the decoder recover ANY ONE bad/missing line in that group.
+"""
 
-    Args:
-        excel_file (str): The path to the Excel file.
-        header_row (int): The row number where the column headers are located.
-                          Defaults to 1 (the first row).
+import sys, base64, zlib, textwrap, itertools, functools, operator
 
-    Raises:
-        FileNotFoundError: If the specified Excel file does not exist.
-        IndexError: If the workbook is empty (no sheets).
-        ValueError: If the 'SSN' column is not found in the header row on the first sheet.
-        AssertionError: If any cell in the 'SSN' column on the first sheet
-                        is not formatted as text in Excel.
-    """
-    ssn_column_index = -1
-    ssn_column_letter = None
-    sheet = None # Initialize sheet variable
+WIDTH        = 60          # characters per data line
+GROUP_SIZE   = int(sys.argv[2]) if len(sys.argv) > 2 else 10   # 10→parity = 10 % overhead
+PARITY_TAG   = "P"         # first character of parity‑line number field
 
-    try:
-        workbook = openpyxl.load_workbook(excel_file)
+def crc32(s: bytes) -> int:
+    return zlib.crc32(s) & 0xffffffff
 
-        # Get the first sheet
-        if not workbook.sheetnames:
-             raise IndexError(f"The workbook '{excel_file}' contains no sheets.")
-        sheet_name = workbook.sheetnames[0]
-        sheet = workbook[sheet_name]
+def xor_bytes(a: bytes, b: bytes) -> bytes:
+    # pad shorter side
+    if len(a) < len(b):
+        a += b'\0' * (len(b) - len(a))
+    elif len(b) < len(a):
+        b += a'\0' * (len(a) - len(b))
+    return bytes(x ^ y for x, y in zip(a, b))
 
-        print(f"Using the first sheet: '{sheet_name}'")
+with open(sys.argv[1], 'rb') as fh:
+    raw = fh.read()
 
-        # 1. Find the column index and letter of the 'SSN' column in the header row
-        header_row_cells = sheet[header_row]
-        for cell in header_row_cells:
-            if isinstance(cell.value, str) and cell.value.strip().upper() == 'SSN':
-                ssn_column_index = cell.column
-                ssn_column_letter = cell.column_letter
-                break
+b32 = base64.b32encode(raw).decode('ascii')
+blocks = textwrap.wrap(b32, WIDTH)
 
-        if ssn_column_index == -1:
-            raise ValueError(f"Column named 'SSN' not found in row {header_row} of the first sheet '{sheet_name}'.")
+for group_index in range(0, len(blocks), GROUP_SIZE):
+    group = blocks[group_index:group_index + GROUP_SIZE]
 
-        print(f"Found 'SSN' column at column {ssn_column_letter} (index {ssn_column_index})")
+    # emit data lines
+    for offset, blk in enumerate(group, 1):
+        num = group_index + offset                    # 1‑based overall line number
+        crc = crc32(blk.encode('ascii'))
+        print(f"{num:06d} {blk:<{WIDTH}} {crc:08x}")
 
-        # 2. Iterate through cells in the SSN column (starting from the row after the header)
-        for row_index in range(header_row + 1, sheet.max_row + 1):
-            cell = sheet.cell(row=row_index, column=ssn_column_index)
-
-            # Check if the number format is '@' (text) and the cell is not empty
-            if cell.number_format != '@' and cell.value is not None:
-                 raise AssertionError(
-                    f"Cell {cell.coordinate} in the 'SSN' column on sheet '{sheet_name}' "
-                    f"is not formatted as text in Excel. Number Format: {cell.number_format}, "
-                    f"Value: {cell.value}"
-                )
-            # Optional: You might add a check here to ensure non-empty cells actually
-            # contain string-like data if you have strict requirements beyond Excel's formatting.
-            # For example:
-            # if cell.value is not None and not isinstance(cell.value, str):
-            #      raise AssertionError(f"Cell {cell.coordinate} in the 'SSN' column contains a non-string value: {cell.value}")
-
-
-        print(f"Assertion successful: All cells in the 'SSN' column on the first sheet "
-              f"'{sheet_name}' are formatted as character/text in Excel.")
-
-    except FileNotFoundError:
-        print(f"Error: File not found at {excel_file}")
-        raise # Re-raise the exception after printing
-    except IndexError:
-        print(f"Error: The workbook '{excel_file}' is empty and contains no sheets.")
-        raise # Re-raise the exception after printing
-    except ValueError as ve:
-        print(f"Error: {ve}")
-        raise # Re-raise the exception after printing
-    except AssertionError as ae:
-        print(f"Assertion Failed: {ae}")
-        raise # Re-raise the exception after printing
-    except Exception as e:
-        print(f"An unexpected error occurred: {e}")
-        raise # Re-raise any other unexpected exceptions
-
-# Example Usage:
-excel_file_path = 'your_excel_file.xlsx' # Replace with the path to your file
-
-try:
-    assert_ssn_column_is_character_first_sheet(excel_file_path)
-    print("Validation passed.")
-except (FileNotFoundError, IndexError, ValueError, AssertionError) as e:
-    print("Validation failed.")
-    # The specific error message is printed within the function
+    # compute XOR parity of raw *bytes* (not the text) for the group
+    raw_group = [base64.b32decode(b + '=' * (-len(b) % 8)) for b in group]
+    parity = functools.reduce(xor_bytes, raw_group)
+    parity_b32 = base64.b32encode(parity).decode('ascii').rstrip('=')
+    crc_parity = crc32(parity_b32.encode('ascii'))
+    # parity line number = 'P'+group-start to keep it unique & sortable
+    print(f"{PARITY_TAG}{group_index//GROUP_SIZE:05d} {parity_b32:<{WIDTH}} {crc_parity:08x}")
