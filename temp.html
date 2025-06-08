@@ -1,0 +1,21 @@
+<html>
+<head>
+    <style>
+        table {{ border-collapse: collapse; margin: 20px 0; }}
+        th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
+        th {{ background-color: #f2f2f2; }}
+        .fail {{ color: red; font-weight: bold; }}
+        .review {{ color: orange; font-weight: bold; }}
+    </style>
+</head>
+<body>
+    <p>Validation tests did not all pass for process <b>{job.plog_name}</b></p>
+
+    <h3>Summary:</h3>
+    {summary_html}
+
+    {non_passing_html}
+
+    <p>Please review the validation results and take appropriate action.</p>
+</body>
+</html>
