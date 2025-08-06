@@ -1,0 +1,9 @@
+
+Inability to get around driver
+
+I think what I care about for datetime columns is just that
+- We have a table with a field of the same name containing values matching the source
+- The process of making that table doesn’t involve “calculations” done to the field, i.e. involves no transformations other than casting. If we’re only casting, there’s little risk we’ll somehow make a mistake.
+
+I think to meet these two criteria you have to have a `cast(field)` in the raw ingestion query. But as long as that’s not a problem the criteria are easy to meet. One simple way would be to ingest a `to_char(field, …) as field_str` to Raw, and then cast back to timestamp in the conversion to sanitized or curated.
+
