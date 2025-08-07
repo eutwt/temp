@@ -35,4 +35,20 @@ cat("URLs found:\n")
 print(iqy_data$urls)
 
 cat("\nParameters found:\n")
+
+
+
+library(httr)
+library(xml2)
+
+# If you need authentication
+response <- GET("your_xml_url_here", 
+                authenticate("username", "password", type = "ntlm"))
+
+# Parse the XML response
+xml_content <- content(response, "parsed")
+
+# Convert to data frame
+rows <- xml_find_all(xml_content, ".//z:row")
+df <- map_dfr(rows, ~ as.data.frame(t(xml_attrs(.x)), stringsAsFactors = FALSE))
 print(iqy_data$parameters)
