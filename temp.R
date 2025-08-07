@@ -1,50 +1,22 @@
-library(httr2)
+library(httr)
 library(jsonlite)
-library(tidyverse)
 
-# Function to get ServiceNow demands
-get_servicenow_demands <- function(instance_url, username, password, limit = 100) {
-  # Build the request
-  req <- request(paste0(instance_url, "/api/now/table/demand")) %>%
-    req_headers(
-      Accept = "application/json"
-    ) %>%
-    req_auth_basic(username, password) %>%
-    req_url_query(
-      sysparm_limit = limit,
-      # You can add more query parameters as needed
-      # sysparm_query = "active=true",
-      # sysparm_fields = "number,short_description,state"
-    )
+# Function to get SharePoint list data using REST API
+get_sharepoint_list <- function(site_url, list_name, username, password) {
+  # Construct REST API URL
+  api_url <- paste0(site_url, "/_api/web/lists/getbytitle('", list_name, "')/items")
   
-  # Perform the request and handle the response
-  response <- tryCatch({
-    req %>%
-      req_perform() %>%
-      resp_body_json()
-  }, error = function(e) {
-    stop(paste("API request failed:", e$message))
-  })
+  # Make authenticated request
+  response <- GET(
+    api_url,
+    authenticate(username, password, type = "basic"),
+    add_headers("Accept" = "application/json;odata=verbose")
+  )
   
-  # Convert the response to a data frame
-  if (!is.null(response$result)) {
-    demands_df <- as.data.frame(do.call(rbind, response$result))
-    return(demands_df)
+  if (http_status(response)$category == "Success") {
+    json_data <- fromJSON(content(response, "text"))
+    return(json_data$d$results)
   } else {
-    stop("No results found in the response")
+    stop("Failed to retrieve SharePoint data")
   }
 }
-
-# Example usage:
-# Replace these with your actual credentials
-instance_url <- "https://now.zj.com"
-username <- "your_username"
-password <- "your_password"
-
-# Get demands
-try({
-  demands <- get_servicenow_demands(instance_url, username, password)
-  print(head(demands))
-}, error = function(e) {
-  message("Error fetching demands: ", e$message)
-})
