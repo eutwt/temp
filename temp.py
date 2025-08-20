@@ -13,19 +13,28 @@ def serialize_dialect(dialect):
         # Add other attributes as needed
     }
 
+from sqlalchemy.dialects.oracle.cx_oracle import OracleDialect_cx_oracle
+
 def deserialize_dialect(dialect_dict):
     """Recreate dialect from dictionary"""
-    from sqlalchemy.dialects import oracle
     
-    # Create new dialect instance
-    dialect = oracle.cx_oracle.OracleDialect_cx_oracle()
+    class PreInitializedOracleDialect(OracleDialect_cx_oracle):
+        def __init__(self):
+            super().__init__()
+            # Set all the pre-configured values
+            for key, value in dialect_dict.items():
+                if key != 'class':
+                    setattr(self, key, value)
+        
+        def initialize(self, connection):
+            # Skip all initialization - we're already configured
+            pass
+        
+        def _get_server_version_info(self, connection):
+            # Return the pre-configured version
+            return self.server_version_info
     
-    # Set the attributes
-    for key, value in dialect_dict.items():
-        if key != 'class':
-            setattr(dialect, key, value)
-    
-    return dialect
+    return PreInitializedOracleDialect()
 
 # Usage
 working_dialect_dict = serialize_dialect(working_engine.dialect)
