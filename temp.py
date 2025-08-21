@@ -1,3 +1,4 @@
+# https://www.newyorkfed.org/banking/circulars/11141.html
 import json
 
 def serialize_dialect(dialect):
