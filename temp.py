@@ -25,7 +25,11 @@ def copy_directory_with_exclusions(
     Args:
         source_dir: Source directory path
         dest_dir: Destination directory path
-        exclude_dirs: List of subdirectory names to exclude
+        exclude_dirs: List of subdirectory names or paths to exclude
+                     Can be:
+                     - Simple names: "node_modules", ".git"
+                     - Relative paths: "src/temp", "data/cache"
+                     - Absolute paths: "/home/user/project/temp"
         use_rsync: Use rsync if available (more efficient)
         verbose: Show progress information
     
@@ -48,13 +52,48 @@ def copy_directory_with_exclusions(
     # Create destination directory if it doesn't exist
     os.makedirs(dest_dir, exist_ok=True)
     
+    # Process exclude list to handle both absolute and relative paths
+    processed_excludes = _process_exclude_list(exclude_dirs, source_dir)
+    
     # Check if rsync is available
     if use_rsync and shutil.which('rsync'):
-        return _copy_with_rsync(source_dir, dest_dir, exclude_dirs, verbose)
+        return _copy_with_rsync(source_dir, dest_dir, processed_excludes, verbose)
     else:
         if use_rsync:
             print("rsync not found, falling back to cp command...")
-        return _copy_with_cp(source_dir, dest_dir, exclude_dirs, verbose)
+        return _copy_with_cp(source_dir, dest_dir, processed_excludes, verbose)
+
+
+def _process_exclude_list(exclude_dirs: List[str], source_dir: str) -> List[str]:
+    """
+    Process exclude list to handle absolute paths, relative paths, and simple names.
+    Returns a list suitable for rsync exclusion patterns.
+    """
+    processed = []
+    source_dir = os.path.abspath(source_dir)
+    
+    for exclude in exclude_dirs:
+        exclude = exclude.strip()
+        if not exclude:
+            continue
+            
+        # Check if it's an absolute path
+        if os.path.isabs(exclude):
+            # Convert absolute path to relative to source
+            try:
+                rel_path = os.path.relpath(exclude, source_dir)
+                # Only include if it's actually inside the source directory
+                if not rel_path.startswith('..'):
+                    processed.append(rel_path)
+                else:
+                    print(f"Warning: Exclude path '{exclude}' is outside source directory, skipping")
+            except ValueError:
+                print(f"Warning: Cannot process exclude path '{exclude}', skipping")
+        else:
+            # It's already a relative path or simple name
+            processed.append(exclude)
+    
+    return processed
 
 
 def _copy_with_rsync(
@@ -124,7 +163,15 @@ def _copy_with_cp(
         for i, exclude in enumerate(exclude_dirs):
             if i > 0:
                 find_cmd.append('-o')
-            find_cmd.extend(['-name', exclude, '-prune'])
+            
+            # Handle both simple names and paths
+            if '/' in exclude:
+                # It's a path - use full path matching
+                full_exclude_path = os.path.join(source_dir, exclude)
+                find_cmd.extend(['-path', full_exclude_path, '-prune'])
+            else:
+                # It's a simple name - match anywhere
+                find_cmd.extend(['-name', exclude, '-prune'])
         find_cmd.append(')')
         find_cmd.append('-o')
     
@@ -177,10 +224,35 @@ def _copy_with_cp(
 def _get_directory_size(path: str, exclude_dirs: List[str]) -> int:
     """Calculate total size of directory excluding certain subdirectories."""
     total_size = 0
+    path = os.path.abspath(path)
     
     for dirpath, dirnames, filenames in os.walk(path):
+        # Check if current directory should be excluded
+        rel_dir = os.path.relpath(dirpath, path)
+        
         # Remove excluded directories from dirnames to prevent walking into them
-        dirnames[:] = [d for d in dirnames if d not in exclude_dirs]
+        new_dirnames = []
+        for dirname in dirnames:
+            # Check against all exclusion patterns
+            should_exclude = False
+            dir_rel_path = os.path.join(rel_dir, dirname) if rel_dir != '.' else dirname
+            
+            for exclude in exclude_dirs:
+                if '/' in exclude:
+                    # Path-based exclusion
+                    if dir_rel_path == exclude or dir_rel_path.startswith(exclude + '/'):
+                        should_exclude = True
+                        break
+                else:
+                    # Name-based exclusion
+                    if dirname == exclude:
+                        should_exclude = True
+                        break
+            
+            if not should_exclude:
+                new_dirnames.append(dirname)
+        
+        dirnames[:] = new_dirnames
         
         for filename in filenames:
             filepath = os.path.join(dirpath, filename)
@@ -207,16 +279,22 @@ if __name__ == "__main__":
     source_directory = "/path/to/source"
     destination_directory = "/path/to/destination"
     
-    # List of subdirectories to exclude
+    # List of subdirectories to exclude - now supports multiple formats
     exclude_list = [
+        # Simple folder names (excluded anywhere in tree)
         ".git",
         "__pycache__",
         "node_modules",
         ".venv",
-        "venv",
-        "build",
-        "dist",
-        "*.egg-info"
+        
+        # Relative paths (excluded at specific locations)
+        "src/temp",
+        "data/cache",
+        "build/intermediate",
+        
+        # Absolute paths (will be converted to relative)
+        "/path/to/source/specific/folder/to/exclude",
+        "/path/to/source/another/specific/path"
     ]
     
     # Perform the copy
